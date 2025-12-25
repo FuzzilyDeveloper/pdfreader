@@ -3,8 +3,6 @@ import tempfile
 import streamlit as st
 
 from pypdf import PdfReader
-from langchain.schema import Document
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.vectorstores import Chroma
 from langchain.chat_models import ChatOpenAI
@@ -14,26 +12,41 @@ from langchain.chains import RetrievalQA
 st.set_page_config(page_title="PDF Q&A (LangChain + Streamlit)", layout="wide")
 
 
+def _chunk_text(text, chunk_size=1000, chunk_overlap=200):
+    if chunk_size <= 0:
+        yield text
+        return
+    start = 0
+    text_len = len(text)
+    while start < text_len:
+        end = min(start + chunk_size, text_len)
+        yield text[start:end]
+        if end == text_len:
+            break
+        start = max(end - chunk_overlap, end)
+
+
 def process_pdf(file_bytes, chunk_size=1000, chunk_overlap=200, persist_directory=None):
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         tmp.write(file_bytes)
         tmp_path = tmp.name
 
     reader = PdfReader(tmp_path)
-    docs = []
+    chunks = []
+    metadatas = []
     for i, page in enumerate(reader.pages):
         try:
             text = page.extract_text() or ""
         except Exception:
             text = ""
-        if text.strip():
-            docs.append(Document(page_content=text, metadata={"page": i + 1}))
-
-    splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
-    docs_split = splitter.split_documents(docs)
+        if not text.strip():
+            continue
+        for chunk in _chunk_text(text, chunk_size=chunk_size, chunk_overlap=chunk_overlap):
+            chunks.append(chunk)
+            metadatas.append({"page": i + 1})
 
     embeddings = OpenAIEmbeddings()
-    vectordb = Chroma.from_documents(docs_split, embeddings, persist_directory=persist_directory)
+    vectordb = Chroma.from_texts(chunks, embeddings, metadatas=metadatas, persist_directory=persist_directory)
     return vectordb
 
 
