@@ -37,7 +37,11 @@ except Exception:
             return OpenAILLM(model_name=model_name, temperature=temperature, **kwargs)
     except Exception:
         ChatOpenAI = None
-from langchain.chains import RetrievalQA
+RetrievalQA = None
+try:
+    from langchain.chains import RetrievalQA
+except Exception:
+    RetrievalQA = None
 from types import SimpleNamespace
 
 
@@ -151,8 +155,50 @@ def process_pdf(file_bytes, chunk_size=1000, chunk_overlap=200, persist_director
 def get_qa_chain(vectordb, model_name="gpt-3.5-turbo", temperature=0.0):
     retriever = vectordb.as_retriever(search_kwargs={"k": 4})
     llm = ChatOpenAI(temperature=temperature, model_name=model_name)
-    qa = RetrievalQA.from_chain_type(llm=llm, chain_type="stuff", retriever=retriever, return_source_documents=True)
-    return qa
+
+    if RetrievalQA is not None:
+        qa = RetrievalQA.from_chain_type(llm=llm, chain_type="stuff", retriever=retriever, return_source_documents=True)
+        return qa
+
+    # Fallback: simple QA implementation when langchain.chains.RetrievalQA is unavailable
+    class SimpleQA:
+        def __init__(self, llm, retriever):
+            self.llm = llm
+            self.retriever = retriever
+
+        def run(self, query):
+            # retrieve
+            if hasattr(self.retriever, "get_relevant_documents"):
+                docs = self.retriever.get_relevant_documents(query)
+            else:
+                # some retrievers may implement a different method
+                docs = self.retriever.get_relevant_documents(query)
+
+            context = "\n\n".join([getattr(d, "page_content", str(d)) for d in docs])
+            prompt = (
+                "You are a helpful assistant. Use the context to answer the question. "
+                "If the answer is not in the context, say you don't know.\n\n"
+                f"Context:\n{context}\n\nQuestion: {query}\nAnswer:"
+            )
+
+            try:
+                # langchain LLMs support __call__(prompt)
+                answer = self.llm(prompt)
+            except Exception:
+                # fallback: try .generate or str()
+                if hasattr(self.llm, "generate"):
+                    gen = self.llm.generate([prompt])
+                    # try to extract text
+                    try:
+                        answer = gen.generations[0][0].text
+                    except Exception:
+                        answer = str(gen)
+                else:
+                    answer = str(self.llm)
+
+            return {"answer": answer, "source_documents": docs}
+
+    return SimpleQA(llm, retriever)
 
 
 def main():
