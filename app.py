@@ -11,9 +11,19 @@ except Exception:
         from langchain.embeddings.openai import OpenAIEmbeddings
     except Exception:
         OpenAIEmbeddings = None
-from langchain.vectorstores import Chroma
+Chroma = None
+try:
+    from langchain.vectorstores import Chroma
+except Exception:
+    Chroma = None
+    try:
+        import chromadb
+        from chromadb.config import Settings
+    except Exception:
+        chromadb = None
 from langchain.chat_models import ChatOpenAI
 from langchain.chains import RetrievalQA
+from types import SimpleNamespace
 
 
 st.set_page_config(page_title="PDF Q&A (LangChain + Streamlit)", layout="wide")
@@ -61,8 +71,66 @@ def process_pdf(file_bytes, chunk_size=1000, chunk_overlap=200, persist_director
         )
 
     embeddings = OpenAIEmbeddings()
-    vectordb = Chroma.from_texts(chunks, embeddings, metadatas=metadatas, persist_directory=persist_directory)
-    return vectordb
+    # If LangChain's Chroma is available use it directly
+    if Chroma is not None:
+        vectordb = Chroma.from_texts(chunks, embeddings, metadatas=metadatas, persist_directory=persist_directory)
+        return vectordb
+
+    # Fallback: use chromadb directly and wrap a simple retriever interface
+    if chromadb is None:
+        raise ImportError(
+            "No vectorstore available. Install langchain with Chroma support or install chromadb."
+        )
+
+    client = chromadb.Client(Settings(chroma_db_impl="inmemory"))
+    # create or get a collection
+    try:
+        collection = client.get_collection(name="pdfreader")
+    except Exception:
+        collection = client.create_collection(name="pdfreader")
+
+    # compute embeddings for all chunks
+    if not hasattr(embeddings, "embed_documents"):
+        raise ImportError("Embeddings implementation does not support embed_documents().")
+    vectors = embeddings.embed_documents(chunks)
+
+    ids = [str(i) for i in range(len(chunks))]
+    collection.add(ids=ids, embeddings=vectors, metadatas=metadatas or [], documents=chunks)
+
+    # simple wrapper to provide as_retriever()
+    class SimpleRetriever:
+        def __init__(self, collection, embeddings):
+            self.collection = collection
+            self.embeddings = embeddings
+
+        def as_retriever(self, search_kwargs=None):
+            k = 4
+            if search_kwargs and "k" in search_kwargs:
+                k = search_kwargs["k"]
+            return SimpleRetriever.Retriever(self.collection, self.embeddings, k)
+
+        class Retriever:
+            def __init__(self, collection, embeddings, k):
+                self.collection = collection
+                self.embeddings = embeddings
+                self.k = k
+
+            def get_relevant_documents(self, query):
+                # compute query embedding
+                if hasattr(self.embeddings, "embed_query"):
+                    qvec = self.embeddings.embed_query(query)
+                else:
+                    qvec = self.embeddings.embed_documents([query])[0]
+                res = self.collection.query(query_embeddings=[qvec], n_results=self.k, include=["documents", "metadatas"])
+                docs = []
+                # res fields are lists per query
+                docs_list = res.get("documents", [[]])[0]
+                metas_list = res.get("metadatas", [[]])[0]
+                for d, m in zip(docs_list, metas_list):
+                    docs.append(SimpleNamespace(page_content=d, metadata=m or {}))
+                return docs
+
+    return SimpleRetriever(collection, embeddings)
 
 
 def get_qa_chain(vectordb, model_name="gpt-3.5-turbo", temperature=0.0):
