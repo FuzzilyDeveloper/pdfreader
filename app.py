@@ -3,7 +3,14 @@ import tempfile
 import streamlit as st
 
 from pypdf import PdfReader
-from langchain.embeddings import OpenAIEmbeddings
+OpenAIEmbeddings = None
+try:
+    from langchain.embeddings import OpenAIEmbeddings
+except Exception:
+    try:
+        from langchain.embeddings.openai import OpenAIEmbeddings
+    except Exception:
+        OpenAIEmbeddings = None
 from langchain.vectorstores import Chroma
 from langchain.chat_models import ChatOpenAI
 from langchain.chains import RetrievalQA
@@ -44,6 +51,14 @@ def process_pdf(file_bytes, chunk_size=1000, chunk_overlap=200, persist_director
         for chunk in _chunk_text(text, chunk_size=chunk_size, chunk_overlap=chunk_overlap):
             chunks.append(chunk)
             metadatas.append({"page": i + 1})
+
+    if OpenAIEmbeddings is None:
+        raise ImportError(
+            "OpenAIEmbeddings not found in installed langchain.\n"
+            "Please pin a compatible langchain version or install a LangChain release that provides OpenAIEmbeddings.\n"
+            "Example: add 'langchain>=0.0.300' to requirements.txt or in your environment run: pip install 'langchain>=0.0.300'\n"
+            "Alternatively, modify the app to use a different embeddings implementation."
+        )
 
     embeddings = OpenAIEmbeddings()
     vectordb = Chroma.from_texts(chunks, embeddings, metadatas=metadatas, persist_directory=persist_directory)
