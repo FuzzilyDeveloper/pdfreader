@@ -21,7 +21,22 @@ except Exception:
         from chromadb.config import Settings
     except Exception:
         chromadb = None
-from langchain.chat_models import ChatOpenAI
+ChatOpenAI = None
+try:
+    from langchain.chat_models import ChatOpenAI
+except Exception:
+    try:
+        from langchain.llms import OpenAI as OpenAILLM
+
+        def ChatOpenAI(*args, **kwargs):
+            # Adapt call to langchain.llms.OpenAI which expects model_name or model
+            model_name = kwargs.pop("model_name", None)
+            if model_name is None and len(args) >= 1:
+                model_name = args[0]
+            temperature = kwargs.pop("temperature", 0.0)
+            return OpenAILLM(model_name=model_name, temperature=temperature, **kwargs)
+    except Exception:
+        ChatOpenAI = None
 from langchain.chains import RetrievalQA
 from types import SimpleNamespace
 
