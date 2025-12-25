@@ -2,7 +2,8 @@ import os
 import tempfile
 import streamlit as st
 
-from langchain.document_loaders import PyPDFLoader
+from pypdf import PdfReader
+from langchain.schema import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.vectorstores import Chroma
@@ -18,8 +19,15 @@ def process_pdf(file_bytes, chunk_size=1000, chunk_overlap=200, persist_director
         tmp.write(file_bytes)
         tmp_path = tmp.name
 
-    loader = PyPDFLoader(tmp_path)
-    docs = loader.load()
+    reader = PdfReader(tmp_path)
+    docs = []
+    for i, page in enumerate(reader.pages):
+        try:
+            text = page.extract_text() or ""
+        except Exception:
+            text = ""
+        if text.strip():
+            docs.append(Document(page_content=text, metadata={"page": i + 1}))
 
     splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
     docs_split = splitter.split_documents(docs)
