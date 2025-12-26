@@ -1,9 +1,18 @@
-streamlit>=1.20
-langchain>=0.0.300
-openai>=0.27.0
-chromadb>=0.3.29
-pypdf>=3.14.3
-tiktoken>=0.4.0
+# Core Python libraries
+streamlit
 
-# Optional but recommended
-python-dotenv>=1.0.0
+# LangChain ecosystem
+langchain==1.2.0
+langchain-core==1.2.5
+langchain-community==0.4.1
+langchain-openai==1.1.6
+langchain-classic==1.0.1
+
+# Optional: text splitters if you plan to chunk documents
+langchain-text-splitters==1.1.0
+
+# OpenAI SDK (needed for ChatOpenAI and embeddings)
+openai>=1.0.0
+
+# PDF parsing (PyPDFLoader depends on PyPDF2)
+PyPDF2
