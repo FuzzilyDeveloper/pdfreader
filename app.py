@@ -1,16 +1,32 @@
 ﻿import os
 import tempfile
 import streamlit as st
+import langchain
 
-from langchain.document_loaders import PyPDFLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.embeddings import OpenAIEmbeddings
-from langchain.vectorstores import Chroma
-from langchain.chat_models import ChatOpenAI
-from langchain.chains import RetrievalQA
+
+from langchain_community.document_loaders import PyPDFLoader
+from langchain_openai import OpenAIEmbeddings
+from langchain_community.vectorstores import Chroma
+from langchain_openai import ChatOpenAI
+from langchain_classic.chains import RetrievalQA
+from langchain_core.prompts import ChatPromptTemplate
 
 
 st.set_page_config(page_title="PDF Q&A (LangChain + Streamlit)", layout="wide")
+
+
+# Custom simple text splitter as RecursiveCharacterTextSplitter is unavailable
+def simple_text_splitter(docs, chunk_size=1000, chunk_overlap=200):
+    split_docs = []
+    for doc in docs:
+        text = doc.page_content if hasattr(doc, 'page_content') else str(doc)
+        start = 0
+        while start < len(text):
+            end = min(start + chunk_size, len(text))
+            chunk = text[start:end]
+            split_docs.append(type(doc)(page_content=chunk))
+            start += chunk_size - chunk_overlap
+    return split_docs
 
 
 def process_pdf(file_bytes, chunk_size=1000, chunk_overlap=200, persist_directory=None):
@@ -21,8 +37,8 @@ def process_pdf(file_bytes, chunk_size=1000, chunk_overlap=200, persist_director
     loader = PyPDFLoader(tmp_path)
     docs = loader.load()
 
-    splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
-    docs_split = splitter.split_documents(docs)
+    # Use custom splitter
+    docs_split = simple_text_splitter(docs, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
 
     embeddings = OpenAIEmbeddings()
     vectordb = Chroma.from_documents(docs_split, embeddings, persist_directory=persist_directory)
